@@ -1,0 +1,130 @@
+from pytrends.request import TrendReq
+import pandas as pd
+import os
+
+kw_list=['oled tv','lg oled tv','super uhd + lg nano cell + lg nanocell + lg nano tv + nano cell tv + nanocell tv','qled tv','sony oled tv']
+# country_list=['global','US','CA','FR','DE','IT','NL','BE','ES','SE','PL','RU','AU','VN','TR','MX','BR']
+country_list=["global","US"]
+timeline=['2018-06-01 2018-06-30','2018-01-01 2018-01-31']
+
+pytrends = TrendReq(hl = 'en-US', tz=360)
+os.chdir('Z:/2019 LGE HE CAV 모니터링 업무/99. 개인폴더/이동섭') # 파일 경로 지정
+writer=pd.ExcelWriter('TV검색점유율12.xlsx',engine='xlsxwriter') # 파일명 지정
+
+if 'global' in country_list:
+    country_list[country_list.index('global')]=''
+
+final_dict=dict()
+final_search=dict()
+for country in country_list:
+    timedict=dict()
+    search_query=dict()
+    for time in timeline:
+               
+        #검색지수 추출
+        pytrends.build_payload(kw_list, cat=0, timeframe= time, geo=country , gprop ='')
+        df=pytrends.interest_over_time()
+
+        df_sorted=pd.DataFrame({'oled tv': df[kw_list[0]],'lg oled tv': df[kw_list[1]],'super uhd':df[kw_list[2]],
+                                'qled tv': df[kw_list[3]], 'sony oled tv': df[kw_list[4]]})
+        df_sorted.to_excel(writer,sheet_name='%s in %s'%(country,time))
+        
+        total=sum(df_sorted.sum())
+        product_list=[]
+        for i in range(len(kw_list)):
+            product_list.append(df_sorted.columns[i])
+        
+        #키워드 별 검색지수 합
+        query_volume=[]
+        for j in range(len(product_list)):
+            query_volume.append(df_sorted[product_list[j]].sum())
+            
+        query_avg=[]
+        for n in range(len(product_list)):
+            query_avg.append(df_sorted[product_list[n]].mean())
+
+        #연관 쿼리
+        df2=pytrends.related_queries()
+        if df2['oled tv'].get('top') is None:
+            final_share=[query_volume[1],query_volume[2],query_volume[3],query_volume[4]]
+            final_avg=[query_avg[1],query_avg[2],query_avg[3],query_avg[4]]
+            final_share_2=dict()
+            for o in range(len(final_share)):
+                final_share_2[product_list[o+1]]=final_share[o]/sum(final_share)
+            timedict[time]=final_share_2
+            
+            search_query_final=dict()
+            for t in range(len(final_avg)):
+                search_query_final[product_list[t+1]]=final_avg[t]
+            search_query[time]=search_query_final
+            
+        else:
+            dictFrame=dict()
+            for k in range(len(product_list)):
+                dictFrame[product_list[k]]=df2[product_list[k]]['top']
+            oled_query=pd.DataFrame(dictFrame['oled tv'])
+            oled_query.to_excel(writer,sheet_name='%s in %s'%(country,time), startcol=8)
+
+            #lg, Sony 연관쿼리 구하기
+            lg_oled_query=oled_query[(oled_query['query'].str.contains("lg")==True)]
+            sony_oled_query=oled_query[(oled_query['query'].str.contains("sony")==True)]
+
+            # 전체 OLED 연관쿼리 중 LG/SONY 연관쿼리 비중
+            lg_query_share=lg_oled_query['value'].sum()/oled_query['value'].sum()
+            sony_query_share=sony_oled_query['value'].sum()/oled_query['value'].sum()
+
+            #OLED 검색지수 값 * LG or SONY 연관쿼리 비중 + 각 검색지수 
+            lg_oled_query_total=query_volume[0]*lg_query_share+query_volume[1]
+            sony_oled_query_total=query_volume[0]*sony_query_share+query_volume[4]
+
+            final_share=[lg_oled_query_total,query_volume[2],query_volume[3],sony_oled_query_total]
+            final_avg=[lg_oled_query_total/df_sorted['lg oled tv'].count(),query_avg[2],query_avg[3],
+                       sony_oled_query_total/df_sorted['sony oled tv'].count()]
+
+            final_share_2=dict()
+            for o in range(len(final_share)):
+                final_share_2[product_list[o+1]]=final_share[o]/sum(final_share)
+    
+            timedict[time]=final_share_2
+        
+            search_query_final=dict()
+            for t in range(len(final_avg)):
+                search_query_final[product_list[t+1]]=final_avg[t]
+            
+            search_query[time]=search_query_final
+    if country == '':
+        final_dict['global']=timedict
+        final_search['global']=search_query
+    else:
+        final_dict[country]=timedict
+        final_search[country]=search_query
+
+#         final_data=pd.DataFrame.from_dict(final_share_2,orient='index',columns=timeline)
+        
+#         final_data.to_excel(writer,sheet_name='Summary')
+        
+
+for a in country_list:
+    if a == '':
+        table=pd.DataFrame(final_dict['global'])
+        table.index.name='global'
+        table2=table.reindex(index=product_list[1:])
+        table2.to_excel(writer, sheet_name='Summary', index=True, startrow=country_list.index(a)*6)
+    else:
+        table=pd.DataFrame(final_dict[a])
+        table.index.name=a
+        table2=table.reindex(index=product_list[1:])
+        table2.to_excel(writer, sheet_name='Summary', index=True, startrow=country_list.index(a)*6)
+for b in country_list:
+    if b =='':
+        table_search=pd.DataFrame(final_search['global'])
+        table_search.index.name=b
+        table_search2=table_search.reindex(index=product_list[1:])
+        table_search2.to_excel(writer,sheet_name='검색지수 합',index=True, startrow=country_list.index(b)*6)
+    else:
+        table_search=pd.DataFrame(final_search[b])
+        table_search.index.name=b
+        table_search2=table_search.reindex(index=product_list[1:])
+        table_search2.to_excel(writer,sheet_name='검색지수 합',index=True, startrow=country_list.index(b)*6)
+                   
+writer.save()
